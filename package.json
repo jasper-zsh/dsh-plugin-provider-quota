@@ -1,0 +1,34 @@
+{
+  "name": "dsh-plugin-provider-quota",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider subscription quota readout for the DSH web shell, with support for Kimi For Coding and OpenAI Codex.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "prepare": "tsdown"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "^18.3.1",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.3"
+  }
+}
