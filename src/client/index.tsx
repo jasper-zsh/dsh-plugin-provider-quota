@@ -33,7 +33,9 @@ export function apply(ctx: Context) {
   })
 
   slots.inject('sidebar.footer.action', () => slots.register(
-    { name: 'sidebar.footer.action', id: 'provider-quota', order: 10, label: '订阅额度' },
+    // Cordis Panel 使用默认 order=0，且其浮层固定在侧边栏底部上方。quota 必须排在
+    // 它前面，确保 Cordis 触发按钮仍贴近 Settings，不会被展开后的固定浮层遮住。
+    { name: 'sidebar.footer.action', id: 'provider-quota', order: -10, label: '订阅额度' },
     (props) => <QuotaFooter wide={Boolean((props as { wide?: boolean }).wide)} timer={timer} sessions={sessions} />,
   ))
 
