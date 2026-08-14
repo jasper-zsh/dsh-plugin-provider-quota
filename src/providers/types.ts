@@ -27,10 +27,19 @@ export interface ProviderDef {
   /** 额度/余额查询端点（GET，Bearer 凭证）。 */
   usagesUrl: string
   /**
+   * 可选补充端点（GET，Bearer 凭证），键名作为 normalize 第二参数 `extra` 的
+   * 键，值为端点 URL。补充端点是尽力而为的：请求失败只影响 `extra` 缺席，
+   * 不中止本次查询（如 kimi 的 `/me` 用于取会员等级展示名 `user_level_name`）。
+   */
+  extraUrls?: Record<string, string>
+  /**
    * 额外请求头，按凭证派生（如 codex 从 access token 的 JWT 解出
    * chatgpt-account-id）。抛出异常会中止本次查询并把消息展示为条目错误。
    */
   headers?(key: string): Record<string, string>
-  /** 把 provider 的原始响应归一化为插件统一 JSON 形态。 */
-  normalize(payload: unknown): NormalizedQuota
+  /**
+   * 把 provider 的原始响应归一化为插件统一 JSON 形态。`extra` 为各补充端点
+   * 成功解析出的 JSON 对象（键名见 `extraUrls`）；请求失败或未配置时缺席。
+   */
+  normalize(payload: unknown, extra?: Record<string, unknown>): NormalizedQuota
 }

@@ -1,21 +1,21 @@
 # dsh-plugin-provider-quota
 
-[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/DeepSeek-Harness) 的 Web 插件：在对话输入框底部展示模型 Provider 的订阅额度、限流窗口与账户余额（如 DeepSeek），点击徽标即可查看详情。
+[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/DeepSeek-Harness) 的 Web 插件：在侧边栏底部展示模型 Provider 的订阅额度、限流窗口与账户余额（如 DeepSeek），点击读数即可查看详情。读数注册在 `sidebar.footer.action`（root 作用域），新会话页面与所有页面常驻，切换会话不重挂载、不闪烁。
 
 ## 功能特性
 
-- **紧凑额度徽标**：显示订阅周期和最短限额窗口的剩余比例，例如 `Kimi 66% · 5h 34% · Codex 5h 94% · DeepSeek ¥110.00`。
-- **可视化详情**：展示会员等级、剩余额度、已用进度、重置时间、路由状态、更新时间，以及余额型 Provider 的币种总余额与充值/赠送明细。
-- **额度预警**：剩余比例高于 35% 显示绿色，高于 10% 且不超过 35% 显示黄色，10% 及以下显示红色；存在多个 Provider 或窗口时采用最差状态。余额型 Provider 在账户余额不足（`is_available: false`）时徽标变红并在详情中提示。
-- **精准刷新**：每轮对话结束后识别实际使用的 Provider，并在 2 秒后只刷新对应额度；无法识别时回退到全量刷新。
-- **自动轮询**：每 5 分钟更新一次，Host 端使用 30 秒缓存以减少外部请求。
+- **紧凑额度读数**：侧边栏展开时每个 Provider 一行，显示订阅周期和最短限额窗口的剩余比例，例如 `Kimi 66% · 5h 34%`、`Codex 5h 94%`、`DeepSeek ¥110.00`；侧边栏收起为窄栏时退化为单个指示灯圆点（颜色取所有 Provider 的最差状态）。
+- **可视化详情**：点击读数在浮层中展示会员等级、剩余额度、已用进度、重置时间、路由状态、更新时间，以及余额型 Provider 的币种总余额与充值/赠送明细。浮层渲染在 `shell.overlay` 图层，不会被侧边栏裁剪。
+- **额度预警**：剩余比例高于 35% 显示绿色，高于 10% 且不超过 35% 显示黄色，10% 及以下显示红色；存在多个 Provider 或窗口时采用最差状态。余额型 Provider 在账户余额不足（`is_available: false`）时读数变红并在详情中提示。
+- **回合末刷新**：每轮对话结束后 2 秒静默全量刷新一次额度（读数在 root 作用域拿不到聊天节点，无法精准定位本轮 Provider，故退化为全量刷新）。
+- **自动轮询**：每 5 分钟更新一次，Host 端使用 30 秒缓存以减少外部请求；客户端保留最近一次成功结果，任何重挂载都先渲染缓存、后台静默刷新，不会闪烁。
 - **安全凭据解析**：通过 DSH `credentials` 服务读取 `apiKeyEnv` 引用，原始凭据不会发送到浏览器，也不会写入响应或日志。
 
 ## 支持的 Provider
 
 | Provider | 路由 ID | 额度接口 | 凭据说明 |
 | --- | --- | --- | --- |
-| Kimi For Coding | `kimi-coding` | `https://api.kimi.com/coding/v1/usages` | 使用该路由 `apiKeyEnv` 引用的凭据，通常为 `KIMI_API_KEY`。 |
+| Kimi For Coding | `kimi-coding` | `https://api.kimi.com/coding/v1/usages`（另请求 `/coding/v1/me` 取会员等级展示名 `user_level_name`） | 使用该路由 `apiKeyEnv` 引用的凭据，通常为 `KIMI_API_KEY`。 |
 | OpenAI Codex | `openai-codex` | `https://chatgpt.com/backend-api/wham/usage` | 使用 `CODEX_OAUTH_ACCESS_TOKEN`；建议由 [`dsh-plugin-llm-codex`](https://github.com/jasper-zsh/dsh-plugin-llm-codex) 完成 OAuth 登录和自动刷新。 |
 | DeepSeek | `deepseek-official` | `https://api.deepseek.com/user/balance` | 由 DSH 自带的 `dsh-llm-deepseek` 插件注册，凭据缺省引用 `DEEPSEEK_API_KEY`（可在 `llm-deepseek.apiKeyEnv` 覆盖）。余额是货币金额而非百分比订阅额度，详情展示各币种总余额与充值/赠送明细。 |
 
@@ -87,7 +87,7 @@ llm-pi-ai:
 
 ### 5. 启动并验证
 
-首次安装后重启 `dsh web`。输入框底栏应出现额度徽标；也可以直接检查 Host 端点：
+首次安装后重启 `dsh web`。侧边栏底部应出现额度读数（新会话页面同样可见）；也可以直接检查 Host 端点：
 
 ```bash
 curl http://127.0.0.1:3080/provider-quota/quota.json
@@ -95,10 +95,10 @@ curl http://127.0.0.1:3080/provider-quota/quota.json
 
 ## 使用方式
 
-- 将鼠标悬停在徽标上，可查看各额度窗口的剩余、已用和重置时间。
-- 点击徽标，可展开 Provider 详情浮层。
+- 将鼠标悬停在读数上，可查看各额度窗口的剩余、已用和重置时间。
+- 点击读数，可展开 Provider 详情浮层（渲染在 `shell.overlay` 图层，侧边栏收起为窄栏时同样可用）。
 - 点击详情底部的“刷新”，可绕过 Host 缓存执行全量刷新。
-- 一轮响应完成或被中断后，插件会自动刷新该轮实际使用的 Provider。
+- 一轮响应完成或被中断后，插件会自动静默刷新一次额度。
 
 ## HTTP API
 
@@ -131,10 +131,11 @@ src/
 ├── providers/            # Provider 定义、归一化逻辑与注册表
 └── client/
     ├── index.tsx         # Web 插件入口与槽位注册
-    ├── api.ts            # 同源额度请求
-    ├── hooks.ts          # 轮询与对话结束刷新
+    ├── api.ts            # 同源额度请求（含客户端缓存与并发去重）
+    ├── store.ts          # 读数 ↔ 浮层跨槽位状态桥
+    ├── hooks.ts          # 轮询、会话运行态与回合末刷新
     ├── format.ts         # 格式化与状态计算
-    ├── components.tsx    # 徽标和详情面板
+    ├── components.tsx    # 侧边栏读数与详情浮层
     └── styles.ts         # 插件样式
 ```
 
@@ -163,17 +164,18 @@ pnpm typecheck    # TypeScript 严格类型检查
    - `name` / `short`：详情标题与徽标短名；
    - `settingsNs`：Provider 配置所在的 settings 命名空间；profile 在 providers 字典（默认）或命名空间自身（`settingsShape: 'self'`，如 DeepSeek）时无需设置；
    - `usagesUrl`：额度（或余额）查询地址；
-   - `normalize()`：将原始响应转换为统一的 `NormalizedQuota`。
+   - `normalize(payload, extra?)`：将原始响应转换为统一的 `NormalizedQuota`。
 2. 如果请求需要从凭据派生额外 Header，实现可选的 `headers(key)`。
-3. 在 `src/providers/index.ts` 的 `SUPPORTED` 数组中注册该定义。
+3. 如果展示还需要另一个只读端点（如 Kimi 的 `/me` 会员展示名），实现可选的 `extraUrls`（键名会出现在 `normalize` 的 `extra` 参数中；请求失败只让对应键缺席，不中止查询）。
+4. 在 `src/providers/index.ts` 的 `SUPPORTED` 数组中注册该定义。
 
 百分比型 Provider 填充 `usage`/`windows`；货币余额型 Provider（如 DeepSeek）把数据放入 `balance`（`{ available, entries: [{ currency, total, granted, toppedUp }] }`），`usage`/`windows` 置空。Client 端由统一数据结构驱动，两类 Provider 都会自动渲染，不需要为新 Provider 修改组件。
 
 ## 常见问题
 
-### 输入框底部没有额度徽标
+### 侧边栏底部没有额度读数
 
-确认至少一个受支持的 Provider 已在 DSH 中配置（Kimi/Codex 在 `llm-pi-ai.providers`；DeepSeek 由 `dsh-llm-deepseek` 插件注册路由即可）。如果接口返回的 `providers` 数组为空，插件会隐藏徽标。
+确认至少一个受支持的 Provider 已在 DSH 中配置（Kimi/Codex 在 `llm-pi-ai.providers`；DeepSeek 由 `dsh-llm-deepseek` 插件注册路由即可）。如果接口返回的 `providers` 数组为空，插件会隐藏读数。
 
 ### Provider 显示警告标记
 
@@ -183,7 +185,7 @@ pnpm typecheck    # TypeScript 严格类型检查
 - 凭据引用未写入 DSH credentials，也不存在于进程环境；
 - 凭据已过期或额度接口返回 HTTP 错误；
 - Codex access token 不是包含 `chatgpt_account_id` 的 OAuth JWT；
-- DeepSeek 余额不足（`is_available: false`）时徽标变红、详情显示“账户余额不足”，需前往 DeepSeek 开放平台充值。
+- DeepSeek 余额不足（`is_available: false`）时读数变红、详情显示“账户余额不足”，需前往 DeepSeek 开放平台充值。
 
 ### 详情显示“路由未激活”
 

@@ -13,6 +13,9 @@ import type { NormalizedQuota, ProviderEntry, QuotaView } from './types'
 
 const CACHE_MS = 30000
 const FETCH_TIMEOUT_MS = 20000
+// 补充端点（extraUrls）的超时比主额度接口更短：它只是 enrichment，
+// 失败不应拖慢整个额度视图。
+const EXTRA_TIMEOUT_MS = 5000
 
 export interface QuotaQuery {
   /** 指定 id 时精准刷新该 provider（绕过缓存）；否则按缓存策略返回全量视图。 */
@@ -38,6 +41,26 @@ export function createQuotaResponder(deps: QuotaDeps): QuotaResponder {
   let cacheAt = 0
   let cacheData: QuotaView | null = null
   let inflight: Promise<QuotaView> | null = null
+
+  // 尽力而为地拉取补充端点（如 kimi 的 /me）：任何一个失败（HTTP 错误、
+  // 超时、非 JSON）都只让对应键缺席，不中止主查询。
+  async function fetchExtra(def: ProviderDef, key: string): Promise<Record<string, unknown>> {
+    const extra: Record<string, unknown> = {}
+    for (const [name, url] of Object.entries(def.extraUrls ?? {})) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            authorization: 'Bearer ' + key,
+            accept: 'application/json',
+            ...(def.headers !== undefined ? def.headers(key) : {}),
+          },
+          signal: AbortSignal.timeout(EXTRA_TIMEOUT_MS),
+        })
+        if (res.ok) extra[name] = JSON.parse(await res.text())
+      } catch (ignore) {}
+    }
+    return extra
+  }
 
   async function queryProvider(def: ProviderDef, key: string): Promise<NormalizedQuota> {
     const res = await fetch(def.usagesUrl, {
@@ -68,7 +91,8 @@ export function createQuotaResponder(deps: QuotaDeps): QuotaResponder {
     } catch (ignore) {
       throw new Error('响应不是有效 JSON')
     }
-    return def.normalize(payload)
+    const extra = await fetchExtra(def, key)
+    return def.normalize(payload, extra)
   }
 
   function activeRoutes(): Record<string, boolean> {

@@ -1,7 +1,6 @@
 // Pure formatting and selection helpers — no React, no fetch, no cordis.
 
 import type { QuotaDetail, QuotaWindow } from '../types'
-import type { SessionSnapshot } from './services'
 
 export type Level = 'high' | 'mid' | 'low'
 
@@ -83,17 +82,4 @@ export function primaryWindow(windows: QuotaWindow[]): QuotaWindow | null {
     if (a === null || a === undefined || (b !== null && b !== undefined && b < a)) best = w
   }
   return best
-}
-
-// 从会话快照中找最后一条 assistant 节点，取其实际使用的 provider 路由
-// （provenance 为完成请求的稳定身份；中断冻结的节点只有 requestConfig）
-export function lastTurnProvider(session: SessionSnapshot | undefined): string | null {
-  if (!session || !Array.isArray(session.nodes)) return null
-  for (let i = session.nodes.length - 1; i >= 0; i--) {
-    const n = session.nodes[i]
-    if (!n || n.kind !== 'assistant') continue
-    if (n.provenance && typeof n.provenance.provider === 'string' && n.provenance.provider) return n.provenance.provider
-    if (n.requestConfig && typeof n.requestConfig.provider === 'string' && n.requestConfig.provider) return n.requestConfig.provider
-  }
-  return null
 }

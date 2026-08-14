@@ -1,15 +1,14 @@
-// Presentational components: the dock badge and its detail popover.
+// Presentational components: the sidebar readout and its detail popover.
 // 全部渲染由 QuotaView 数据驱动，新增 provider 不需要改动这里。
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
-import type { BalanceInfo, ProviderEntry, QuotaDetail, QuotaWindow } from '../types'
+import type { BalanceInfo, ProviderEntry, QuotaDetail, QuotaView, QuotaWindow } from '../types'
 import {
   fmtMoney,
   fmtPct,
   fmtReset,
   fmtTime,
-  lastTurnProvider,
   levelOf,
   primaryWindow,
   shortWindowLabel,
@@ -17,9 +16,10 @@ import {
   windowLabel,
 } from './format'
 import type { Level } from './format'
-import { useQuota, useTurnEndRefresh } from './hooks'
+import { useQuota, useSessionRunning, useTurnEndRefresh } from './hooks'
 import type { QuotaState } from './hooks'
-import type { DockSlotProps, TimerService } from './services'
+import { popoverBus, quotaBus, usePopoverState, useQuotaMirror } from './store'
+import type { SessionsService, TimerService } from './services'
 
 function UsageBlock({ label, u }: { label: string; u: QuotaDetail }) {
   const lv = levelOf(u)
@@ -147,104 +147,222 @@ function PanelBody({ quota }: { quota: QuotaState }) {
   )
 }
 
-export function Badge(props: DockSlotProps & { timer: TimerService | undefined }) {
-  const quota = useQuota(300000, props.timer)
-  const [open, setOpen] = useState(false)
-  const running = !!(props && props.session && props.session.running)
-  const turnProvider = lastTurnProvider(props && props.session)
-  useTurnEndRefresh(quota.load, running, turnProvider, props.timer)
+interface ReadoutMetric {
+  key: string
+  label: string
+  value: string
+  lv?: Level
+}
 
-  // 浮层打开时点击外部关闭
+interface ReadoutRow {
+  key: string
+  lv: Level
+  name: string
+  plan: string | null
+  metrics: ReadoutMetric[]
+}
+
+// 把 footer 读数拆成「provider 名称 + 右对齐指标」的表格式数据。相比拼接成
+// 一整段文本，侧边栏的横向空间可以用于建立稳定的列与视觉层级。
+function buildReadout(data: QuotaView): { rows: ReadoutRow[]; tip: string; worst: Level } {
+  const providers = Array.isArray(data.providers) ? data.providers : []
+  const rows: ReadoutRow[] = []
+  const titles: string[] = []
+  let worst: Level = 'high'
+  const degrade = (lv: Level) => {
+    if (lv === 'low') worst = 'low'
+    else if (lv === 'mid' && worst === 'high') worst = 'mid'
+  }
+  for (const p of providers) {
+    const name = typeof p.short === 'string' ? p.short : p.name
+    const plan = p.quota && typeof p.quota.plan === 'string' && p.quota.plan.trim() ? p.quota.plan.trim() : null
+    const wins = p.quota && Array.isArray(p.quota.windows) ? p.quota.windows : []
+    const bal = p.quota ? p.quota.balance : null
+    const metrics: ReadoutMetric[] = []
+    if (plan) titles.push(p.name + ' 订阅等级：' + plan)
+    let lv: Level = 'high'
+    const rowDegrade = (next: Level) => {
+      if (next === 'low') lv = 'low'
+      else if (next === 'mid' && lv === 'high') lv = 'mid'
+      degrade(next)
+    }
+    if (p.state === 'ok' && p.quota && (p.quota.usage || wins.length > 0 || (bal && bal.entries.length > 0))) {
+      if (p.quota.usage) {
+        const u = p.quota.usage
+        const metricLevel = levelOf(u)
+        metrics.push({ key: 'cycle', label: '周期', value: fmtPct(u.remaining), lv: metricLevel })
+        titles.push(p.name + ' 周期额度：剩余 ' + fmtPct(u.remaining) + ' · 已用 ' + fmtPct(u.used) + (u.resetTime ? '（' + fmtReset(u.resetTime) + '）' : ''))
+        rowDegrade(metricLevel)
+      }
+      const win = primaryWindow(wins)
+      if (win !== null) {
+        const metricLevel = levelOf(win.detail)
+        metrics.push({ key: 'window', label: shortWindowLabel(win.durationMinutes), value: fmtPct(win.detail.remaining), lv: metricLevel })
+      }
+      for (const w of wins) {
+        if (!w || !w.detail) continue
+        titles.push(p.name + ' ' + windowLabel(w.durationMinutes) + '：剩余 ' + fmtPct(w.detail.remaining) + ' · 已用 ' + fmtPct(w.detail.used) + (w.detail.resetTime ? '（' + fmtReset(w.detail.resetTime) + '）' : ''))
+        rowDegrade(levelOf(w.detail))
+      }
+      if (bal && bal.entries.length > 0) {
+        const first = bal.entries[0]
+        const balanceLevel: Level = bal.available === false ? 'low' : 'high'
+        metrics.push({ key: 'balance', label: '余额', value: fmtMoney(first.total, first.currency), lv: balanceLevel })
+        titles.push(p.name + ' 余额：' + fmtMoney(first.total, first.currency) + '（' + first.currency + '）' + (bal.available === false ? ' · 余额不足' : ''))
+        if (bal.available === false) rowDegrade('low')
+        for (let i = 1; i < bal.entries.length; i++) {
+          const e = bal.entries[i]
+          titles.push(p.name + ' ' + e.currency + ' 余额：' + fmtMoney(e.total, e.currency))
+        }
+      }
+      rows.push({ key: p.id, lv, name, plan, metrics })
+    } else {
+      rows.push({ key: p.id, lv: 'mid', name, plan, metrics: [{ key: 'error', label: '', value: '暂不可用', lv: 'mid' }] })
+      titles.push(p.name + '：' + (p.error || '查询失败'))
+      degrade('mid')
+    }
+  }
+  const tip = titles.join('\n') + (data.fetchedAt ? '\n更新于 ' + fmtTime(data.fetchedAt) : '') + '\n点击查看详情'
+  return { rows, tip, worst }
+}
+
+function SideHeader({ pending }: { pending: boolean }) {
+  return (
+    <span className="dshpq-side-head">
+      <span className="dshpq-side-title">Provider quota</span>
+      <span className="dshpq-side-hint">{pending ? '更新中' : '详情'} <span aria-hidden="true">⌃</span></span>
+    </span>
+  )
+}
+
+// 侧边栏底部读数（sidebar.footer.action，root 作用域）：展开态是占满槽位宽度的
+// 紧凑表格，收起态保留一个状态圆点；点击打开详情浮层。root 作用域不会因会话
+// 切换重挂载，模块级缓存 + 静默刷新保证数字原地更新。
+export function QuotaFooter({ wide, timer, sessions }: {
+  wide: boolean
+  timer: TimerService | undefined
+  sessions: SessionsService | undefined
+}) {
+  const quota = useQuota(300000, timer)
+  const running = useSessionRunning(sessions)
+  useTurnEndRefresh(quota.refresh, running, timer)
+  const { open } = usePopoverState()
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  // 把 useQuota 状态镜像给浮层入口（load/refresh 经 useCallback 稳定，仅在数据变化时发布）
+  useEffect(() => {
+    quotaBus.set(quota)
+  }, [quota.data, quota.pending, quota.failed, quota.load, quota.refresh])
+
+  // 浮层打开期间窗口尺寸变化（含侧边栏拖拽）时重新测量锚点
+  useEffect(() => {
+    if (!open) return undefined
+    const onResize = () => {
+      const r = btnRef.current ? btnRef.current.getBoundingClientRect() : null
+      if (r) popoverBus.set(true, { top: r.top, left: r.left })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [open])
+
+  const toggle = () => {
+    const r = btnRef.current ? btnRef.current.getBoundingClientRect() : null
+    popoverBus.set(!open, r ? { top: r.top, left: r.left } : null)
+  }
+
+  if (quota.data === null) {
+    // 无缓存（首载或查询失败）：显示占位/错误，仍可点击打开浮层重试
+    return (
+      <button
+        ref={btnRef}
+        type="button"
+        className={'dshpq-side' + (quota.pending ? ' pending' : '')}
+        title={quota.failed ? '额度查询失败，点击重试' : '正在查询订阅额度…'}
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <SideHeader pending={quota.pending} />
+        <span className={'dshpq-side-empty' + (quota.failed ? ' failed' : '')}>
+          {quota.failed ? '额度查询失败，点击重试' : '正在同步额度…'}
+        </span>
+      </button>
+    )
+  }
+  const { rows, tip, worst } = buildReadout(quota.data)
+  if (rows.length === 0) return null
+  if (!wide) {
+    return (
+      <button
+        ref={btnRef}
+        type="button"
+        className={'dshpq-side-rail' + (quota.pending ? ' pending' : '')}
+        title={tip}
+        aria-label="查看 Provider 额度"
+        aria-expanded={open}
+        onClick={toggle}
+      >
+        <i className={'dshpq-dot lv-' + worst} />
+      </button>
+    )
+  }
+  return (
+    <button
+      ref={btnRef}
+      type="button"
+      className={'dshpq-side' + (quota.pending ? ' pending' : '')}
+      title={tip}
+      aria-label="查看 Provider 额度详情"
+      aria-expanded={open}
+      onClick={toggle}
+    >
+      <SideHeader pending={quota.pending} />
+      <span className="dshpq-side-list">
+        {rows.map((r) => (
+          <span className="dshpq-side-row" key={r.key}>
+            <span className="dshpq-side-provider">
+              <i className={'dshpq-dot lv-' + r.lv} />
+              <span className="dshpq-side-name">{r.name}</span>
+              {r.plan
+                ? <span className="dshpq-side-plan" title={'订阅等级：' + r.plan}>{r.plan}</span>
+                : null}
+            </span>
+            <span className="dshpq-side-metrics">
+              {r.metrics.map((metric) => (
+                <span className="dshpq-side-metric" key={metric.key}>
+                  {metric.label ? <span className="dshpq-side-metric-label">{metric.label}</span> : null}
+                  <span className={'dshpq-side-metric-value lv-' + (metric.lv || 'high')}>{metric.value}</span>
+                </span>
+              ))}
+            </span>
+          </span>
+        ))}
+      </span>
+    </button>
+  )
+}
+
+// 详情浮层（shell.overlay 图层）：侧边栏列 overflow:hidden，直接绝对定位会被
+// 裁剪，因此浮层渲染在 overlay 图层里，position:fixed 定位于读数按钮上方。
+export function QuotaPopover(): ReactNode {
+  const quota = useQuotaMirror()
+  const { open, anchor } = usePopoverState()
+
+  // 点击浮层与读数按钮之外关闭
   useEffect(() => {
     if (!open) return undefined
     const onDown = (ev: MouseEvent) => {
-      let node = ev.target as Node | null
-      while (node) {
-        if (node instanceof Element && node.classList.contains('dshpq-wrap')) return
-        node = node.parentNode
-      }
-      setOpen(false)
+      const t = ev.target as Node | null
+      if (t instanceof Element && t.closest('.dshpq-pop-side, .dshpq-side, .dshpq-side-rail')) return
+      popoverBus.set(false, null)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  let badge: ReactNode = null
-  if (quota.data === null) {
-    badge = <span className="dshpq-badge pending" title="正在查询订阅额度…">额度 …</span>
-  } else {
-    const providers = Array.isArray(quota.data.providers) ? quota.data.providers : []
-    if (providers.length === 0) return null
-    const segments: Array<{ text: string; lv: Level }> = []
-    const titles: string[] = []
-    for (const p of providers) {
-      const short = typeof p.short === 'string' ? p.short : p.name
-      const wins = p.quota && Array.isArray(p.quota.windows) ? p.quota.windows : []
-      const bal = p.quota ? p.quota.balance : null
-      // 每个 provider 一个指示灯（segLv），颜色由该 provider 自己的最差状态决定
-      let segLv: Level = 'high'
-      const segDegrade = (lv: Level) => {
-        if (lv === 'low') segLv = 'low'
-        else if (lv === 'mid' && segLv === 'high') segLv = 'mid'
-      }
-      if (p.state === 'ok' && p.quota && (p.quota.usage || wins.length > 0 || (bal && bal.entries.length > 0))) {
-        // 头条 = 周期剩余（有周期概念时，如 Kimi），否则 = 最短窗口剩余（如 Codex），
-        // 纯余额 provider（如 DeepSeek）显示首个币种余额
-        let text = short
-        const hasRatio = !!(p.quota.usage || wins.length > 0)
-        if (p.quota.usage) {
-          const u = p.quota.usage
-          text += ' ' + fmtPct(u.remaining)
-          titles.push(p.name + ' 周期额度：剩余 ' + fmtPct(u.remaining) + ' · 已用 ' + fmtPct(u.used) + (u.resetTime ? '（' + fmtReset(u.resetTime) + '）' : ''))
-          segDegrade(levelOf(u))
-        }
-        const win = primaryWindow(wins)
-        if (win !== null) {
-          const d = win.detail
-          text += (p.quota.usage ? ' · ' : ' ') + shortWindowLabel(win.durationMinutes) + ' ' + fmtPct(d.remaining)
-        }
-        for (const w of wins) {
-          if (!w || !w.detail) continue
-          titles.push(p.name + ' ' + windowLabel(w.durationMinutes) + '：剩余 ' + fmtPct(w.detail.remaining) + ' · 已用 ' + fmtPct(w.detail.used) + (w.detail.resetTime ? '（' + fmtReset(w.detail.resetTime) + '）' : ''))
-          segDegrade(levelOf(w.detail))
-        }
-        if (bal && bal.entries.length > 0) {
-          const first = bal.entries[0]
-          text += (hasRatio ? ' · ' : ' ') + fmtMoney(first.total, first.currency)
-          titles.push(p.name + ' 余额：' + fmtMoney(first.total, first.currency) + '（' + first.currency + '）' + (bal.available === false ? ' · 余额不足' : ''))
-          if (bal.available === false) segDegrade('low')
-          for (let i = 1; i < bal.entries.length; i++) {
-            const e = bal.entries[i]
-            titles.push(p.name + ' ' + e.currency + ' 余额：' + fmtMoney(e.total, e.currency))
-          }
-        }
-        segments.push({ text, lv: segLv })
-      } else {
-        segments.push({ text: short + ' ⚠', lv: 'mid' })
-        titles.push(p.name + '：' + (p.error || '查询失败'))
-      }
-    }
-    const tip = titles.join('\n') + (quota.data.fetchedAt ? '\n更新于 ' + fmtTime(quota.data.fetchedAt) : '') + '\n点击查看详情'
-    badge = (
-      <button
-        className={'dshpq-badge' + (quota.pending ? ' pending' : '')}
-        title={tip}
-        onClick={() => setOpen(!open)}
-      >
-        {segments.map((s, i) => (
-          <span className="dshpq-badge-seg" key={i}>
-            {i > 0 ? <span className="dshpq-badge-sep">·</span> : null}
-            <span className={'dshpq-dot lv-' + s.lv} />
-            {s.text}
-          </span>
-        ))}
-      </button>
-    )
-  }
+  if (!open || quota === null || anchor === null) return null
   return (
-    <div className="dshpq-wrap">
-      {badge}
-      {open ? <div className="dshpq-pop"><PanelBody quota={quota} /></div> : null}
+    <div className="dshpq-pop dshpq-pop-side" style={{ top: anchor.top - 8, left: anchor.left }}>
+      <PanelBody quota={quota} />
     </div>
   )
 }

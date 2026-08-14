@@ -39,7 +39,11 @@ export interface BalanceInfo {
 
 /** Normalized per-provider quota, produced by each provider's `normalize()`. */
 export interface NormalizedQuota {
-  /** Membership level lowercased (e.g. "pro"); null when unknown. */
+  /**
+   * 订阅等级展示名（如 kimi 的 "Moderato" / "Allegro"）；由 provider 决定
+   * 来源与回退策略（kimi 优先取 /me 的 user_level_name，回退到标题化的
+   * LEVEL_* 枚举码）。null 表示未知。
+   */
   plan: string | null
   /** Subscription-cycle quota; null when the API omits it. */
   usage: QuotaDetail | null
