@@ -10,7 +10,9 @@ import { codex } from './codex'
 import { deepseek } from './deepseek'
 import { kimi } from './kimi'
 import type { ProviderDef } from './types'
+import { zai, zaiCn } from './zai'
 
-export const SUPPORTED: ProviderDef[] = [kimi, codex, deepseek]
+// 百分比订阅型（kimi/codex/zai）在前，货币余额型（deepseek）在后
+export const SUPPORTED: ProviderDef[] = [kimi, codex, zai, zaiCn, deepseek]
 
 export type { ProviderDef } from './types'

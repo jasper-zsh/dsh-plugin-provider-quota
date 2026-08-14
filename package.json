@@ -2,7 +2,7 @@
   "name": "dsh-plugin-provider-quota",
   "version": "0.1.0",
   "private": true,
-  "description": "Provider subscription quota and account balance readout for the DSH web shell, with support for Kimi For Coding, OpenAI Codex, and DeepSeek.",
+  "description": "Provider subscription quota and account balance readout for the DSH web shell, with support for Kimi For Coding, OpenAI Codex, DeepSeek, and Z.AI GLM Coding Plan (international + CN).",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
