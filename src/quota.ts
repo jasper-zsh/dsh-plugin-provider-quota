@@ -84,6 +84,9 @@ export function createQuotaResponder(deps: QuotaDeps): QuotaResponder {
   function configuredProfile(def: ProviderDef): UnknownRecord | null {
     try {
       const ns = asRecord(settings.get(def.settingsNs))
+      // 'self' 型 provider（如 dsh-llm-deepseek 的 llm-deepseek 命名空间）：
+      // 命名空间自身就是 profile，不是 providers 字典项
+      if (def.settingsShape === 'self') return ns
       const providers = asRecord(ns?.providers)
       if (providers !== null) return asRecord(providers[def.id])
     } catch (ignore) {}
@@ -92,19 +95,25 @@ export function createQuotaResponder(deps: QuotaDeps): QuotaResponder {
 
   // 构建单个 provider 的额度条目；该 provider 未在 harness 配置时返回 null
   async function buildEntry(def: ProviderDef, active: Record<string, boolean>): Promise<ProviderEntry | null> {
-    const profile = configuredProfile(def)
+    const routeActive = active[def.id] === true
+    // 'self' 型 provider 没有 providers 字典项：settings 命名空间缺席时，
+    // 路由激活即视为已配置（用 defaultApiKeyEnv 展示）
+    let profile = configuredProfile(def)
+    if (profile === null && def.settingsShape === 'self' && routeActive) profile = {}
     if (profile === null) return null
     const entry: ProviderEntry = {
       id: def.id,
       name: def.name,
       short: def.short,
-      routeActive: active[def.id] === true,
+      routeActive,
       state: 'error',
       quota: null,
       error: null,
       fetchedAt: new Date().toISOString(),
     }
-    const ref = typeof profile.apiKeyEnv === 'string' ? profile.apiKeyEnv.trim() : ''
+    const ref = typeof profile.apiKeyEnv === 'string' && profile.apiKeyEnv.trim()
+      ? profile.apiKeyEnv.trim()
+      : def.defaultApiKeyEnv ?? ''
     if (!ref) {
       entry.error = '该 provider 未配置 apiKeyEnv 凭证引用（可能为 OAuth 登录，暂不支持额度查询）'
       return entry

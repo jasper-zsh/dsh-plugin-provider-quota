@@ -1,12 +1,12 @@
 # dsh-plugin-provider-quota
 
-[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/DeepSeek-Harness) 的 Web 插件：在对话输入框底部展示模型 Provider 的订阅额度与限流窗口，点击徽标即可查看详情。
+[DeepSeek Harness（DSH）](https://github.com/deepseek-ai/DeepSeek-Harness) 的 Web 插件：在对话输入框底部展示模型 Provider 的订阅额度、限流窗口与账户余额（如 DeepSeek），点击徽标即可查看详情。
 
 ## 功能特性
 
-- **紧凑额度徽标**：显示订阅周期和最短限额窗口的剩余比例，例如 `Kimi 66% · 5h 34% · Codex 5h 94%`。
-- **可视化详情**：展示会员等级、剩余额度、已用进度、重置时间、路由状态和更新时间。
-- **额度预警**：剩余比例高于 35% 显示绿色，高于 10% 且不超过 35% 显示黄色，10% 及以下显示红色；存在多个 Provider 或窗口时采用最差状态。
+- **紧凑额度徽标**：显示订阅周期和最短限额窗口的剩余比例，例如 `Kimi 66% · 5h 34% · Codex 5h 94% · DeepSeek ¥110.00`。
+- **可视化详情**：展示会员等级、剩余额度、已用进度、重置时间、路由状态、更新时间，以及余额型 Provider 的币种总余额与充值/赠送明细。
+- **额度预警**：剩余比例高于 35% 显示绿色，高于 10% 且不超过 35% 显示黄色，10% 及以下显示红色；存在多个 Provider 或窗口时采用最差状态。余额型 Provider 在账户余额不足（`is_available: false`）时徽标变红并在详情中提示。
 - **精准刷新**：每轮对话结束后识别实际使用的 Provider，并在 2 秒后只刷新对应额度；无法识别时回退到全量刷新。
 - **自动轮询**：每 5 分钟更新一次，Host 端使用 30 秒缓存以减少外部请求。
 - **安全凭据解析**：通过 DSH `credentials` 服务读取 `apiKeyEnv` 引用，原始凭据不会发送到浏览器，也不会写入响应或日志。
@@ -17,11 +17,12 @@
 | --- | --- | --- | --- |
 | Kimi For Coding | `kimi-coding` | `https://api.kimi.com/coding/v1/usages` | 使用该路由 `apiKeyEnv` 引用的凭据，通常为 `KIMI_API_KEY`。 |
 | OpenAI Codex | `openai-codex` | `https://chatgpt.com/backend-api/wham/usage` | 使用 `CODEX_OAUTH_ACCESS_TOKEN`；建议由 [`dsh-plugin-llm-codex`](https://github.com/jasper-zsh/dsh-plugin-llm-codex) 完成 OAuth 登录和自动刷新。 |
+| DeepSeek | `deepseek-official` | `https://api.deepseek.com/user/balance` | 由 DSH 自带的 `dsh-llm-deepseek` 插件注册，凭据缺省引用 `DEEPSEEK_API_KEY`（可在 `llm-deepseek.apiKeyEnv` 覆盖）。余额是货币金额而非百分比订阅额度，详情展示各币种总余额与充值/赠送明细。 |
 
 插件只展示同时满足以下条件的 Provider：
 
 1. 已在本插件的 Provider 注册表中支持；
-2. 已在 DSH `llm-pi-ai.providers` 中配置对应路由。
+2. 已在 DSH 中配置对应路由 —— `providers` 型（Kimi/Codex）在 `llm-pi-ai.providers` 配置；命名空间型（DeepSeek）由 `dsh-llm-deepseek` 注册、路由激活即展示，无需额外配置。
 
 如果路由已配置但凭据缺失、无法解析或额度接口报错，徽标与详情面板会显示该 Provider 的错误状态。
 
@@ -82,6 +83,7 @@ llm-pi-ai:
 
 - **Kimi**：确保 `KIMI_API_KEY` 能由 DSH `credentials` 服务或进程环境解析。
 - **Codex**：先安装并登录 [`dsh-plugin-llm-codex`](https://github.com/jasper-zsh/dsh-plugin-llm-codex)，由它维护 `CODEX_OAUTH_ACCESS_TOKEN`；本插件只读取消费该令牌，不参与令牌生命周期。
+- **DeepSeek**：无需在 `llm-pi-ai.providers` 中配置 —— 路由 `deepseek-official` 由 DSH 自带的 `dsh-llm-deepseek` 插件注册，默认读取 `DEEPSEEK_API_KEY` 凭据；本插件调用 `GET /user/balance` 只读展示余额，不消耗余额。如需覆盖凭据引用，可在 `llm-deepseek` 命名空间设置 `apiKeyEnv`。
 
 ### 5. 启动并验证
 
@@ -114,6 +116,7 @@ curl http://127.0.0.1:3080/provider-quota/quota.json
 
 ```bash
 curl 'http://127.0.0.1:3080/provider-quota/quota.json?provider=kimi-coding'
+curl 'http://127.0.0.1:3080/provider-quota/quota.json?provider=deepseek-official'
 curl 'http://127.0.0.1:3080/provider-quota/quota.json?force=1'
 ```
 
@@ -158,19 +161,19 @@ pnpm typecheck    # TypeScript 严格类型检查
 1. 在 `src/providers/` 新建 Provider 文件并实现 `ProviderDef`：
    - `id`：DSH 中的 Provider 路由 ID；
    - `name` / `short`：详情标题与徽标短名；
-   - `settingsNs`：Provider 配置所在的 settings 命名空间；
-   - `usagesUrl`：额度查询地址；
+   - `settingsNs`：Provider 配置所在的 settings 命名空间；profile 在 providers 字典（默认）或命名空间自身（`settingsShape: 'self'`，如 DeepSeek）时无需设置；
+   - `usagesUrl`：额度（或余额）查询地址；
    - `normalize()`：将原始响应转换为统一的 `NormalizedQuota`。
 2. 如果请求需要从凭据派生额外 Header，实现可选的 `headers(key)`。
 3. 在 `src/providers/index.ts` 的 `SUPPORTED` 数组中注册该定义。
 
-Client 端由统一数据结构驱动，通常不需要为新 Provider 修改组件。
+百分比型 Provider 填充 `usage`/`windows`；货币余额型 Provider（如 DeepSeek）把数据放入 `balance`（`{ available, entries: [{ currency, total, granted, toppedUp }] }`），`usage`/`windows` 置空。Client 端由统一数据结构驱动，两类 Provider 都会自动渲染，不需要为新 Provider 修改组件。
 
 ## 常见问题
 
 ### 输入框底部没有额度徽标
 
-确认至少一个受支持的 Provider 已存在于 `llm-pi-ai.providers`。如果接口返回的 `providers` 数组为空，插件会隐藏徽标。
+确认至少一个受支持的 Provider 已在 DSH 中配置（Kimi/Codex 在 `llm-pi-ai.providers`；DeepSeek 由 `dsh-llm-deepseek` 插件注册路由即可）。如果接口返回的 `providers` 数组为空，插件会隐藏徽标。
 
 ### Provider 显示警告标记
 
@@ -179,7 +182,8 @@ Client 端由统一数据结构驱动，通常不需要为新 Provider 修改组
 - 路由没有配置 `apiKeyEnv`；
 - 凭据引用未写入 DSH credentials，也不存在于进程环境；
 - 凭据已过期或额度接口返回 HTTP 错误；
-- Codex access token 不是包含 `chatgpt_account_id` 的 OAuth JWT。
+- Codex access token 不是包含 `chatgpt_account_id` 的 OAuth JWT；
+- DeepSeek 余额不足（`is_available: false`）时徽标变红、详情显示“账户余额不足”，需前往 DeepSeek 开放平台充值。
 
 ### 详情显示“路由未激活”
 

@@ -3,7 +3,7 @@
 
 /** One quota detail block (limit/used/remaining/resetTime), null-tolerant. */
 export interface QuotaDetail {
-  /** 上限。当前支持的 provider（kimi-coding）恒为 100 —— 三个数值字段均为百分比而非次数。 */
+  /** 上限。百分比型 provider（如 kimi-coding）恒为 100 —— 三个数值字段均为百分比而非次数。 */
   limit: number | null
   used: number | null
   remaining: number | null
@@ -17,6 +17,26 @@ export interface QuotaWindow {
   detail: QuotaDetail
 }
 
+/** One currency balance entry (e.g. DeepSeek `/user/balance`). */
+export interface BalanceEntry {
+  /** ISO 4217 货币代码，如 CNY / USD。 */
+  currency: string
+  /** 账户总余额（赠送 + 充值），字符串金额解析后的数值。 */
+  total: number
+  /** 未过期赠送余额；接口未提供时为 null。 */
+  granted: number | null
+  /** 充值余额；接口未提供时为 null。 */
+  toppedUp: number | null
+}
+
+/** Monetary account balance (currency-based, not percentage-based). */
+export interface BalanceInfo {
+  /** 账户余额是否足以继续调用（如 DeepSeek 的 is_available）；未知为 null。 */
+  available: boolean | null
+  /** 各币种余额，保留接口返回顺序。 */
+  entries: BalanceEntry[]
+}
+
 /** Normalized per-provider quota, produced by each provider's `normalize()`. */
 export interface NormalizedQuota {
   /** Membership level lowercased (e.g. "pro"); null when unknown. */
@@ -24,6 +44,8 @@ export interface NormalizedQuota {
   /** Subscription-cycle quota; null when the API omits it. */
   usage: QuotaDetail | null
   windows: QuotaWindow[]
+  /** 货币化账户余额（如 DeepSeek）；无余额概念的 provider 为 null。 */
+  balance: BalanceInfo | null
 }
 
 /** Per-provider entry in the quota view. */

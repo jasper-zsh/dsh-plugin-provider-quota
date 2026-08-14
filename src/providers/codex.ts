@@ -66,7 +66,7 @@ function normalize(payload: unknown): NormalizedQuota {
   if (primary !== null) windows.push(primary)
   const secondary = windowOf(rate?.secondary_window, 10080)
   if (secondary !== null) windows.push(secondary)
-  return { plan, usage: null, windows }
+  return { plan, usage: null, windows, balance: null }
 }
 
 export const codex: ProviderDef = {

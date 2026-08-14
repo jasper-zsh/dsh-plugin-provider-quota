@@ -10,6 +10,18 @@ export function fmtPct(n: number | null | undefined): string {
   return n === null || n === undefined ? '—' : String(n) + '%'
 }
 
+// 货币符号表；未收录的币种回退为 "CODE 金额" 形式
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  CNY: '¥', USD: '$', EUR: '€', GBP: '£', JPY: '¥', HKD: 'HK$', CAD: 'C$', AUD: 'A$',
+}
+
+export function fmtMoney(n: number | null | undefined, currency: string | null | undefined): string {
+  if (n === null || n === undefined) return '—'
+  const amount = n.toFixed(2)
+  const sym = currency && CURRENCY_SYMBOLS[currency] ? CURRENCY_SYMBOLS[currency] : ''
+  return sym ? sym + amount : (currency ? currency + ' ' : '') + amount
+}
+
 export function fmtReset(iso: string | null | undefined): string {
   if (!iso) return ''
   const t = new Date(iso).getTime()

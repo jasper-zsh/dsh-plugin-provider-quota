@@ -34,7 +34,7 @@ function normalize(payload: unknown): NormalizedQuota {
   if (typeof membership?.level === 'string' && membership.level) {
     plan = membership.level.replace(/^LEVEL_/, '').toLowerCase()
   }
-  return { plan, usage, windows }
+  return { plan, usage, windows, balance: null }
 }
 
 export const kimi: ProviderDef = {

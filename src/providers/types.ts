@@ -4,7 +4,7 @@
 import type { NormalizedQuota } from '../types'
 
 export interface ProviderDef {
-  /** llm-pi-ai 的 provider 路由名（同时是 settings providers 字典键与 llm 路由 id）。 */
+  /** llm 服务的 provider 路由名（同时是 settings providers 字典键与 llm 路由 id）。 */
   id: string
   /** 浮层卡片标题。 */
   name: string
@@ -12,7 +12,19 @@ export interface ProviderDef {
   short: string
   /** settings 命名空间（该 provider 的 profile 所在处，通常 'llm-pi-ai'）。 */
   settingsNs: string
-  /** 额度查询端点（GET，Bearer 凭证）。 */
+  /**
+   * profile 在 settings 中的形状：
+   * - 'providers'（默认）：`settings[settingsNs].providers[id]` —— 如 llm-pi-ai；
+   * - 'self'：`settings[settingsNs]` 自身就是 profile —— 如 dsh-llm-deepseek 的
+   *   llm-deepseek 命名空间（无该命名空间时，路由激活即按默认凭据展示）。
+   */
+  settingsShape?: 'providers' | 'self'
+  /**
+   * profile 未配置 apiKeyEnv 时回退的默认凭据引用（如 DeepSeek 的
+   * DEEPSEEK_API_KEY）。该引用同样经 DSH credentials 服务解析。
+   */
+  defaultApiKeyEnv?: string
+  /** 额度/余额查询端点（GET，Bearer 凭证）。 */
   usagesUrl: string
   /**
    * 额外请求头，按凭证派生（如 codex 从 access token 的 JWT 解出

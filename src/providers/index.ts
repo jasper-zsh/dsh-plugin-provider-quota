@@ -7,9 +7,10 @@
 // client 半包无需改动（条目渲染与空态提示均由数据驱动）。
 
 import { codex } from './codex'
+import { deepseek } from './deepseek'
 import { kimi } from './kimi'
 import type { ProviderDef } from './types'
 
-export const SUPPORTED: ProviderDef[] = [kimi, codex]
+export const SUPPORTED: ProviderDef[] = [kimi, codex, deepseek]
 
 export type { ProviderDef } from './types'
