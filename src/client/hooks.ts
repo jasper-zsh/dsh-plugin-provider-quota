@@ -48,8 +48,22 @@ export function useQuota(pollMs: number, timer: TimerService | undefined): Quota
     if (quotaCache() === null) load()
     else refresh()
     if (timer === undefined) return undefined
-    return timer.interval(() => refresh(), pollMs)
+    // 轮询恢复路径：失败/无数据时也要回到可见加载重试，不能只静默 refresh
+    // （否则首载失败后数据永远为 null，只能等用户手动点重试）。
+    return timer.interval(() => {
+      if (quotaCache() === null) load()
+      else refresh()
+    }, pollMs)
   }, [])
+
+  // 首载失败后的快速自动重试：15 秒后重试，直到拿到数据或组件卸载。
+  // 轮询间隔（5 分钟）对「打开页面时恰好网络抖动」太久了。
+  useEffect(() => {
+    if (!failed || data !== null) return undefined
+    if (timer !== undefined) return timer.timeout(() => load(), 15000)
+    const t = setTimeout(() => load(), 15000)
+    return () => clearTimeout(t)
+  }, [failed, data, load, timer])
   return { data, pending, failed, load, refresh }
 }
 

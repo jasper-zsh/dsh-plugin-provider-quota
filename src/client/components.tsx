@@ -66,9 +66,11 @@ function BalanceBlock({ b }: { b: BalanceInfo }) {
         <div className="dshpq-balance-row" key={'b' + i}>
           <span className="dshpq-balance-currency">{e.currency}</span>
           <span className="dshpq-balance-total">{fmtMoney(e.total, e.currency)}</span>
-          <span className="dshpq-balance-sub">
-            {'充值 ' + fmtMoney(e.toppedUp, e.currency) + ' · 赠送 ' + fmtMoney(e.granted, e.currency)}
-          </span>
+          {e.toppedUp !== null || e.granted !== null
+            ? <span className="dshpq-balance-sub">
+                {'充值 ' + fmtMoney(e.toppedUp, e.currency) + ' · 赠送 ' + fmtMoney(e.granted, e.currency)}
+              </span>
+            : null}
         </div>
       ))}
     </div>

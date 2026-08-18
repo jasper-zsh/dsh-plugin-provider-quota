@@ -4,7 +4,7 @@
 
 ## 功能特性
 
-- **紧凑额度读数**：侧边栏展开时每个 Provider 一行，显示订阅周期和最短限额窗口的剩余比例，例如 `Kimi 66% · 5h 34%`、`Codex 5h 94%`、`Z.AI CN 5h 99%`、`DeepSeek ¥110.00`；侧边栏收起为窄栏时退化为单个指示灯圆点（颜色取所有 Provider 的最差状态）。
+- **紧凑额度读数**：侧边栏展开时每个 Provider 一行，显示订阅周期和最短限额窗口的剩余比例，例如 `Kimi 66% · 5h 34%`、`Codex 5h 94%`、`Z.AI CN 5h 99%`、`DeepSeek ¥110.00`、`OpenRouter $5.43`；侧边栏收起为窄栏时退化为单个指示灯圆点（颜色取所有 Provider 的最差状态）。
 - **可视化详情**：点击读数在浮层中展示会员等级、剩余额度、已用进度、重置时间、路由状态、更新时间，以及余额型 Provider 的币种总余额与充值/赠送明细。浮层渲染在 `shell.overlay` 图层，不会被侧边栏裁剪。
 - **额度预警**：剩余比例高于 35% 显示绿色，高于 10% 且不超过 35% 显示黄色，10% 及以下显示红色；存在多个 Provider 或窗口时采用最差状态。余额型 Provider 在账户余额不足（`is_available: false`）时读数变红并在详情中提示。
 - **回合末刷新**：每轮对话结束后 2 秒静默全量刷新一次额度（读数在 root 作用域拿不到聊天节点，无法精准定位本轮 Provider，故退化为全量刷新）。
@@ -20,13 +20,14 @@
 | Z.AI（国际站） | `zai` | `https://api.z.ai/api/monitor/usage/quota/limit`（另请求 `/api/biz/subscription/list` 取订阅 `productName`，剥掉产品线前缀后展示为档位名，如 "GLM Coding Pro" → "Pro"） | 默认凭据引用 `ZAI_API_KEY`；标准 `Bearer` 鉴权。 |
 | Z.AI Coding CN（大陆站） | `zai-coding-cn` | `https://open.bigmodel.cn/api/monitor/usage/quota/limit`（另请求 `/api/biz/subscription/list`，档位名处理同上） | 默认凭据引用 `ZAI_CODING_CN_API_KEY`；大陆站 biz/monitor 网关只认裸 API key（无 `Bearer` 前缀），插件已按站点自动处理。 |
 | DeepSeek | `deepseek-official` | `https://api.deepseek.com/user/balance` | 由 DSH 自带的 `dsh-llm-deepseek` 插件注册，凭据缺省引用 `DEEPSEEK_API_KEY`（可在 `llm-deepseek.apiKeyEnv` 覆盖）。余额是货币金额而非百分比订阅额度，详情展示各币种总余额与充值/赠送明细。 |
+| OpenRouter | `openrouter` | `https://openrouter.ai/api/v1/credits` | 配置在 `llm-pi-ai.providers.openrouter`，凭据缺省引用 `OPENROUTER_API_KEY`。OpenRouter 是预购 credit（美元）余额制账户：可用余额 = `total_credits - total_usage`，单一 USD 币种，无赠送/充值细分，详情只展示总余额。 |
 
 Z.AI 两站共用同一路径与响应形态：`data.limits[]` 中的 `TOKENS_LIMIT` 条目即订阅 token 窗口（5 小时 session 与 7 天 weekly，按 `unit`+`number` 识别时长，`percentage` 为已用百分比，`nextResetTime` 为 epoch 毫秒重置时间）；月度工具调用额度（`TIME_LIMIT`，次数语义）不计入百分比展示。
 
 插件只展示同时满足以下条件的 Provider：
 
 1. 已在本插件的 Provider 注册表中支持；
-2. 已在 DSH 中配置对应路由 —— `providers` 型（Kimi/Codex/Z.AI）在 `llm-pi-ai.providers` 配置；命名空间型（DeepSeek）由 `dsh-llm-deepseek` 注册、路由激活即展示，无需额外配置。
+2. 已在 DSH 中配置对应路由 —— `providers` 型（Kimi/Codex/Z.AI/OpenRouter）在 `llm-pi-ai.providers` 配置；命名空间型（DeepSeek）由 `dsh-llm-deepseek` 注册、路由激活即展示，无需额外配置。
 
 如果路由已配置但凭据缺失、无法解析或额度接口报错，徽标与详情面板会显示该 Provider 的错误状态。
 
@@ -83,6 +84,8 @@ llm-pi-ai:
       apiKeyEnv: CODEX_OAUTH_ACCESS_TOKEN
     zai-coding-cn:
       apiKeyEnv: ZAI_CODING_CN_API_KEY
+    openrouter:
+      apiKeyEnv: OPENROUTER_API_KEY
 ```
 
 `apiKeyEnv` 是 DSH 的**凭据引用**，不是要写入 `settings.yaml` 的密钥明文。只需保留实际使用的 Provider：
@@ -91,6 +94,7 @@ llm-pi-ai:
 - **Codex**：先安装并登录 [`dsh-plugin-llm-codex`](https://github.com/jasper-zsh/dsh-plugin-llm-codex)，由它维护 `CODEX_OAUTH_ACCESS_TOKEN`；本插件只读取消费该令牌，不参与令牌生命周期。
 - **Z.AI**：国际站路由 `zai` 默认读取 `ZAI_API_KEY`，大陆站路由 `zai-coding-cn` 默认读取 `ZAI_CODING_CN_API_KEY`（与 pi-ai 的环境变量一致，profile 里可省略 `apiKeyEnv`）；两站均使用 GLM Coding Plan 的 API key，插件只读查询用量，不消耗额度。
 - **DeepSeek**：无需在 `llm-pi-ai.providers` 中配置 —— 路由 `deepseek-official` 由 DSH 自带的 `dsh-llm-deepseek` 插件注册，默认读取 `DEEPSEEK_API_KEY` 凭据；本插件调用 `GET /user/balance` 只读展示余额，不消耗余额。如需覆盖凭据引用，可在 `llm-deepseek` 命名空间设置 `apiKeyEnv`。
+- **OpenRouter**：在 `llm-pi-ai.providers.openrouter` 配置 `apiKeyEnv`（或依赖进程环境变量 `OPENROUTER_API_KEY`）即可展示账户 USD 余额（只读查询 `/api/v1/credits`，不消耗额度）；DPI 型 providers 路由缺席时不展示该 provider。
 
 ### 5. 启动并验证
 
@@ -125,6 +129,7 @@ curl http://127.0.0.1:3080/provider-quota/quota.json
 curl 'http://127.0.0.1:3080/provider-quota/quota.json?provider=kimi-coding'
 curl 'http://127.0.0.1:3080/provider-quota/quota.json?provider=zai-coding-cn'
 curl 'http://127.0.0.1:3080/provider-quota/quota.json?provider=deepseek-official'
+curl 'http://127.0.0.1:3080/provider-quota/quota.json?provider=openrouter'
 curl 'http://127.0.0.1:3080/provider-quota/quota.json?force=1'
 ```
 

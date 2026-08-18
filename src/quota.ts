@@ -16,6 +16,10 @@ const FETCH_TIMEOUT_MS = 20000
 // 补充端点（extraUrls）的超时比主额度接口更短：它只是 enrichment，
 // 失败不应拖慢整个额度视图。
 const EXTRA_TIMEOUT_MS = 5000
+// 单个 provider 全流程（凭证解析 + 主查询 + 补充端点）的兜底上限。覆盖
+// fetch 自身超时之外的挂死路径（如凭证服务阻塞）：超时降级为该 provider
+// 的错误条目，绝不拖住整个视图。
+const PROVIDER_TIMEOUT_MS = 30000
 
 export interface QuotaQuery {
   /** 指定 id 时精准刷新该 provider（绕过缓存）；否则按缓存策略返回全量视图。 */
@@ -167,13 +171,47 @@ export function createQuotaResponder(deps: QuotaDeps): QuotaResponder {
     return { fetchedAt: new Date().toISOString(), supported: SUPPORTED.map((d) => d.id), providers }
   }
 
+  function errorEntry(def: ProviderDef, routeActive: boolean, message: string): ProviderEntry {
+    return {
+      id: def.id,
+      name: def.name,
+      short: def.short,
+      routeActive,
+      state: 'error',
+      quota: null,
+      error: message,
+      fetchedAt: new Date().toISOString(),
+    }
+  }
+
+  // 带兜底超时的 buildEntry：单个 provider 挂死（网络半开、凭证服务阻塞等）
+  // 时降级为错误条目，保证全量视图总在 PROVIDER_TIMEOUT_MS 内返回。
+  async function buildEntryBounded(def: ProviderDef, active: Record<string, boolean>): Promise<ProviderEntry | null> {
+    const task = buildEntry(def, active)
+    // 超时后 task 仍在后台继续：挂一个空拒绝处理器，避免未处理拒绝告警。
+    task.catch(() => {})
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<ProviderEntry>((resolve) => {
+      timer = setTimeout(
+        () => resolve(errorEntry(def, active[def.id] === true, '查询超时（超过 ' + Math.round(PROVIDER_TIMEOUT_MS / 1000) + ' 秒）')),
+        PROVIDER_TIMEOUT_MS,
+      )
+    })
+    try {
+      return await Promise.race([task, timeout])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+
+  // 全量刷新并行查询所有 provider：串行时一个慢 provider（20s 主查询 +
+  // 5s 补充端点）会阻塞后面全部 provider，多 provider 超时叠加曾导致首载
+  // 长时间停在「正在同步额度」；并行后最坏耗时 ≈ 单个 provider 的兜底上限。
   async function collect(): Promise<QuotaView> {
     const active = activeRoutes()
+    const entries = await Promise.all(SUPPORTED.map((def) => buildEntryBounded(def, active)))
     const providers: ProviderEntry[] = []
-    for (const def of SUPPORTED) {
-      const entry = await buildEntry(def, active)
-      if (entry !== null) providers.push(entry)
-    }
+    for (const entry of entries) if (entry !== null) providers.push(entry)
     return view(providers)
   }
 
@@ -196,7 +234,7 @@ export function createQuotaResponder(deps: QuotaDeps): QuotaResponder {
     const def = SUPPORTED.find((d) => d.id === id)
     if (def === undefined) return cacheData !== null ? cacheData : fullRefresh()
     if (cacheData === null) return fullRefresh()
-    const entry = await buildEntry(def, activeRoutes())
+    const entry = await buildEntryBounded(def, activeRoutes())
     if (entry === null) return cacheData
     const providers: ProviderEntry[] = []
     let found = false

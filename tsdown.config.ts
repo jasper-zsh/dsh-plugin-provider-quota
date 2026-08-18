@@ -20,7 +20,10 @@ export default defineConfig([
     target: 'es2024',
     fixedExtension: false,
     dts: false,
-    clean: true,
+    // clean 只用于 Host 已停止的 release 构建（DSHPQ_CLEAN=1 pnpm build）。
+    // 开发期必须原位改写：运行中的 Host 用 chokidar 文件事件做 HMR，只认
+    // change；clean 的 unlink → add 序列会让 HMR 漏掉这次重建。
+    clean: process.env.DSHPQ_CLEAN === '1',
   },
   {
     name: `${id}/client`,
